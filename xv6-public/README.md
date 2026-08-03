@@ -6,23 +6,90 @@ Implementation of Assignment 1 on top of **xv6-public** (x86), the MIT 6.828
 > The stock xv6 `README` (no extension) is upstream's and is left untouched —
 > `mkfs` bakes it into the filesystem image.
 
+## What's implemented
+
+| Part | Feature | Where | Status |
+|------|---------|-------|--------|
+| 1 | xv6 builds and boots | `Makefile` | Done |
+| 2 | `sys_toggle` — flip syscall tracing on/off | `syscall.c` | Done |
+| 2 | `sys_print_count` — per-syscall counts, sorted | `syscall.c` | Done |
+| 2 | `sys_add` — sum of two integers | `sysproc.c` | Done |
+| 2 | `sys_ps` — list running processes | `proc.c`, `sysproc.c` | Done |
+| 3 | `sys_send` / `sys_recv` — unicast IPC, blocking receive | `proc.c`, `sysproc.c` | Done |
+| 3 | `sys_send_multi` — multicast IPC | `sysproc.c` | Done |
+| 4 | Distributed sum, 8 processes (unicast) | `assign1_8.c` | Done |
+| 4 | Two-phase variance (multicast) | `assign1_8.c` | Done |
+| 5 | Report | — | Not started |
+
+Six new system calls (numbers 22–28) and six new user programs. Full detail per
+part below.
+
 ## Requirements
 
 ```bash
 sudo apt-get install -y qemu-system-x86 expect
 ```
 
-`gcc -m32` must work. On Ubuntu without multilib: `sudo apt-get install gcc-multilib`.
+- **`qemu-system-x86`** — runs xv6. On Ubuntu ≤ 20.04 this package was called
+  `qemu`; that metapackage no longer exists.
+- **`expect`** — only needed for scripted testing and the grader's `check.sh`.
+  Not required to run xv6 by hand.
 
-## Build and run
+`gcc -m32` must work. If it doesn't: `sudo apt-get install gcc-multilib`.
+
+## Running
+
+From this directory:
 
 ```bash
-make            # bootblock + kernel + xv6.img
-make fs.img     # filesystem image with all user programs
-make qemu-nox   # boot in the terminal; quit with Ctrl-A then x
+make qemu-nox
 ```
 
-`make clean && make` for a full rebuild.
+That single command compiles the kernel, builds the filesystem image, and boots
+xv6 in your terminal — `qemu-nox` depends on both `xv6.img` and `fs.img`, so
+there is no need to run `make` separately.
+
+**Quit with `Ctrl-A` then `x`** — press `Ctrl-A`, release, then press `x`.
+
+Wait for the prompt before typing:
+
+```
+init: starting sh
+$
+```
+
+Characters sent before that line appears are swallowed by the boot sequence.
+
+Type `ls` at the `$` prompt to see every available program.
+
+### Other build targets
+
+```bash
+make              # kernel + xv6.img only
+make fs.img       # filesystem image with the user programs
+make clean        # remove all build output
+```
+
+After editing any source file, just re-run `make qemu-nox` — it rebuilds what
+changed. If a build looks stale or produces a confusing link error:
+
+```bash
+make clean && make qemu-nox
+```
+
+Avoid plain `make qemu`: it opens a separate graphical window and needs X.
+`qemu-nox` runs in the terminal and is what `check.sh` drives.
+
+### Building from a fresh clone
+
+```bash
+sudo apt-get install -y qemu-system-x86 expect
+git clone https://github.com/Hobbbit31/OS.git
+cd OS/xv6-public
+make qemu-nox
+```
+
+Build artifacts are not committed, so the first build compiles everything.
 
 ### Modern-gcc patch
 
@@ -88,7 +155,7 @@ Two behaviours are not determinable from the assignment PDF:
 
 ## Part 3 — IPC
 
-### Unicast (done)
+### Unicast
 
 Every process carries a fixed-size mailbox (`struct msgqueue` in `proc.h`):
 a circular buffer of `MSGQMAX` (64) slots of `MSGSIZE` (8) bytes.
@@ -193,14 +260,17 @@ to a sample program that was not supplied:
 
 ## Test programs
 
-| Program | Purpose |
-|---------|---------|
-| `user_toggle` | Calls `toggle()` — named by the assignment |
-| `print_count` | Calls `print_count()` — named by the assignment |
-| `test_add` | `test_add <int> <int>` — prints the sum |
-| `test_ps` | Calls `ps()` |
-| `test_ipc` | Parent/child unicast round trip |
-| `assign1_8` | Part 4 distributed sum/variance — the submitted program |
+All are run from the xv6 shell after `make qemu-nox`.
+
+| Command | What it does | Exercises |
+|---------|--------------|-----------|
+| `user_toggle` | Toggles syscall tracing on/off | `sys_toggle` |
+| `print_count` | Prints per-syscall counts for the current window | `sys_print_count` |
+| `test_add <int> <int>` | Prints the sum of two integers | `sys_add` |
+| `test_ps` | Lists live processes as `pid:<n> name:<name>` | `sys_ps` |
+| `test_ipc` | Parent/child message round trip | `sys_send`, `sys_recv` |
+| `assign1_8 0 arr` | Distributed sum, 8 workers, unicast | `sys_send`, `sys_recv` |
+| `assign1_8 1 arr` | Sum + variance, two-phase | `sys_send_multi` too |
 
 `user_toggle` and `print_count` are required by the spec, and `assign1_8` is
 the file the assignment asks students to submit; the `test_*` programs are
@@ -211,18 +281,38 @@ deterministically so results are reproducible across rebuilds. It is baked
 into the filesystem image by the `fs.img` rule, which the assignment requires
 be changed to `./mkfs fs.img README arr $(UPROGS)`.
 
-### Verified output
+## How to test
+
+Boot with `make qemu-nox`, wait for the `$` prompt, then run the commands
+below. Every output shown here was captured from an actual run.
+
+### Part 2 — `sys_add`
 
 ```
 $ test_add 12 30
 42
 $ test_add -7 -8
 -15
+$ test_add 100 -1
+99
+```
+
+### Part 2 — `sys_ps`
+
+```
 $ test_ps
 pid:1 name:init
 pid:2 name:sh
 pid:5 name:test_ps
-$ user_toggle
+```
+
+Only live processes appear. The pid varies with how many programs have run
+before it — earlier commands consume pids.
+
+### Part 2 — syscall tracing
+
+```
+$ user_toggle          # tracing ON, counters zeroed
 $ echo hi
 hi
 $ print_count
@@ -233,9 +323,28 @@ sys_read 20
 sys_sbrk 2
 sys_wait 2
 sys_write 7
+$ user_toggle          # tracing OFF
+```
+
+Counts come from the shell forking and exec'ing `echo`, not from `echo` alone.
+Names are alphabetical, `sys_` prefixed, non-zero only. Running `user_toggle`
+twice restarts the window from zero.
+
+### Part 3 — unicast IPC
+
+```
 $ test_ipc
 child received: hello
 parent received: 42
+```
+
+Parent sends a string to the child, child replies with an integer. The parent
+sends *before* the child is guaranteed to have called `recv()`, so this
+exercises mailbox buffering rather than a rendezvous.
+
+### Part 4 — distributed sum and variance
+
+```
 $ assign1_8 0 arr
 Sum: 4453
 $ assign1_8 1 arr
@@ -244,7 +353,27 @@ Variance: 8.6018
 ```
 
 Cross-checked against the same computation on the host: sum `4453`, mean
-`4.453`, variance `8.601791`.
+`4.453`, variance `8.601791`. The reported `8.6018` is the four-decimal
+fixed-point rendering.
+
+### Cross-checking the IPC layer with the tracer
+
+The two features verify each other — run a distributed sum with tracing on:
+
+```
+$ user_toggle
+$ assign1_8 0 arr
+Sum: 4453
+$ print_count
+...
+sys_recv 8
+sys_send 8
+...
+```
+
+Exactly 8 sends and 8 receives for one unicast run: 8 workers each reporting
+once, the coordinator collecting 8. Any stray, lost, or duplicated message
+would show up as a different count.
 
 ### Note on `atoi`
 
@@ -254,22 +383,50 @@ graders' own test programs link against the stock version.
 
 ## Automated testing
 
-`check.sh` drives xv6 through `expect`. The same approach works for ad-hoc
-tests:
+xv6 has no way to pipe a script into the shell, so tests are driven with
+`expect` — the same mechanism the grader's `check.sh` uses.
+
+Save as `run_tests.exp` and run with `expect run_tests.exp`:
 
 ```tcl
-set timeout 90
+set timeout 150
 spawn make qemu-nox
+
+# Wait for the shell. Sending input before this line appears loses
+# characters to the boot sequence.
 expect "init: starting sh"
 expect "$ "
-send "test_ipc\r"
-expect "$ "
-send "\x01x"
+
+send "test_add 12 30\r";    expect "$ "
+send "test_add -7 -8\r";    expect "$ "
+send "test_ps\r";           expect "$ "
+send "test_ipc\r";          expect "$ "
+send "assign1_8 0 arr\r";   expect "$ "
+send "assign1_8 1 arr\r";   expect "$ "
+send "user_toggle\r";       expect "$ "
+send "assign1_8 0 arr\r";   expect "$ "
+send "print_count\r";       expect "$ "
+
+send "\x01x"                ;# Ctrl-A x quits QEMU
 expect eof
 ```
 
-Sending input before `init: starting sh` appears will lose characters to the
-boot sequence.
+Piping instead of using `expect` (`printf 'ls\n' | make qemu-nox`) mostly
+works but races the boot: the first character is usually eaten before the
+shell is listening.
+
+## Verifying a clean checkout
+
+To confirm nothing needed is missing from the repository:
+
+```bash
+git clone https://github.com/Hobbbit31/OS.git /tmp/verify
+cd /tmp/verify/xv6-public
+make qemu-nox
+```
+
+A fresh clone carries no build artifacts, so this compiles everything from
+source. If any file were missing from the commit, the build would fail.
 
 ## Files modified from stock xv6
 
