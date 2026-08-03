@@ -1,0 +1,5 @@
+# Build artifacts (xv6-public/.gitignore covers the rest inside that tree)
+*.o
+*.d
+*.img
+*~
